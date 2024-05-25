@@ -1,10 +1,6 @@
 /* win32_main.cpp */
 #define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-
-typedef int bool;
-#define true  1
-#define false 0
+#include <windows.h>
 
 static bool quit = false;
 static int exit_code = 0;
