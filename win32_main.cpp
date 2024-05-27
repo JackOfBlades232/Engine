@@ -115,6 +115,7 @@ void draw_bouncing_square(frame_buffer_t *buf, float dt)
     max_x = MIN(buf->w-1, max_x);
     max_y = MIN(buf->h-1, max_y);
 
+    // @TODO: contiguous color blend
     u32 cube_col = (0xFF << 16) | ((u8)((int)(x * 255.f)) << 8) | (u8)((int)(y * 255.f));
 
     pixel = &buf->mem[min_y*buf->w + min_x];
@@ -221,6 +222,8 @@ void draw_flower_of_life(frame_buffer_t *buf, float dt)
             {
                 *pixel = 0xFFFFFF;
             }
+
+            // @TODO: flower shape & colors
 
             ++pixel;
         }
