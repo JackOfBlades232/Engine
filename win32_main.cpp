@@ -5,6 +5,8 @@
 #include <cstddef>
 
 #include <cstdio>
+#include <cstdlib>
+#include <ctime>
 
 typedef uint8_t  u8;
 typedef uint16_t u16;
@@ -21,6 +23,7 @@ struct frame_buffer_t {
     u32 *mem;
     int w, h;
     int byte_size;
+    int pixel_size;
 };
 
 static bool quit = false;
@@ -28,6 +31,8 @@ static int exit_code = 0;
 
 static HBITMAP frame_bmp           = nullptr;
 static frame_buffer_t frame_buffer = {};
+
+#define ARR_SIZE(_arr) (sizeof(_arr) / sizeof((_arr)[0]))
 
 #define MIN(_a, _b) ((_a) < (_b) ? (_a) : (_b))
 #define MAX(_a, _b) ((_a) > (_b) ? (_a) : (_b))
@@ -84,6 +89,8 @@ void draw_bouncing_square(frame_buffer_t *buf, float dt)
         y += vel_y * fixed_dt;
     }
 
+    arr_set<u32>(frame_buffer.mem, 0x0, frame_buffer.pixel_size);
+
     float pix_per_meter = (float)buf->h / meters_per_scr_h;
 
     // Draw ground
@@ -101,8 +108,8 @@ void draw_bouncing_square(frame_buffer_t *buf, float dt)
 
     min_x = MAX(0, min_x);
     min_y = MAX(0, min_y);
-    max_x = MIN(buf->w, max_x);
-    max_y = MIN(buf->h, max_y);
+    max_x = MIN(buf->w-1, max_x);
+    max_y = MIN(buf->h-1, max_y);
 
     u32 cube_col = (0xFF << 16) | ((u8)((int)(x * 255.f)) << 8) | (u8)((int)(y * 255.f));
 
@@ -113,6 +120,64 @@ void draw_bouncing_square(frame_buffer_t *buf, float dt)
 
         pixel += buf->w - (max_x - min_x);
     }
+}
+
+void draw_fire(frame_buffer_t *buf, float dt)
+{
+    const float pix_per_sec = 100.f;
+    const float step_dt     = 1.f/60.f;
+
+    static u32 palette[256];
+    static bool palette_inited = false;
+    static float accum_dt = 0.f;
+
+    if (!palette_inited) {
+        for (int i = 0; i < ARR_SIZE(palette); ++i) {
+            int hue = i / 3;
+            int saturation = 255;
+            int lightness = MIN(255, i * 2);
+
+            u8 r = (u8)lightness;
+            u8 g = (u8)((float)lightness * hue / 85.f);
+            u8 b = (u8)0;
+
+            palette[i] = (r << 16) | (g << 8) | b;
+        }
+
+        palette_inited = true;
+    }
+
+    accum_dt += dt;
+
+    while (accum_dt >= step_dt) {
+        accum_dt -= step_dt;
+
+        for (int x = 0; x < buf->w; ++x)
+            buf->mem[(buf->h - 1)*buf->w + x] = palette[(int)(((float)rand()/RAND_MAX) * 255.f)];
+
+        for (int y = 0; y < buf->h; ++y)
+            for (int x = 0; x < buf->w; ++x) {
+                int xm1 = MAX(x - 1, 0);
+                int xp1 = MIN(x + 1, buf->w-1);
+                int yp1 = MIN(y + 1, buf->h-1);
+                int yp2 = MIN(y + 2, buf->h-1);
+
+                u32 p1m1 = buf->mem[yp1*buf->w + xm1];
+                u32 p1   = buf->mem[yp1*buf->w + x];
+                u32 p1p1 = buf->mem[yp1*buf->w + xp1];
+                u32 p2   = buf->mem[yp2*buf->w + x];
+
+                u32 r_sum = (p1m1 >> 16) + (p1 >> 16) + (p1p1 >> 16) + (p2 >> 16);
+                u32 g_sum = ((p1m1 >> 8) & 0xFF) + ((p1 >> 8) & 0xFF) + ((p1p1 >> 8) & 0xFF) + ((p2 >> 8) & 0xFF);
+                u32 b_sum = (p1m1 & 0xFF) + (p1 & 0xFF) + (p1p1 & 0xFF) + (p2 & 0xFF);
+
+                buf->mem[y*buf->w + x] = 
+                    ((u8)(r_sum * 64 / 257) << 16) |
+                    ((u8)(g_sum * 64 / 257) << 8)  |
+                    (u8)(b_sum * 64 / 257);
+            }
+    }
+
 }
 
 // @TODO: basic drawing & msg loop, quit on esc
@@ -163,6 +228,9 @@ int APIENTRY WinMain(HINSTANCE h_inst,
                      PSTR cmdline, 
                      int cmdshow)
 {
+    // @TODO: functions for random
+    srand(time(nullptr));
+
     const char app_name[] = "My engine";
 
     WNDCLASS wc = {};
@@ -207,9 +275,10 @@ int APIENTRY WinMain(HINSTANCE h_inst,
 
     frame_buffer.w = 720;
     frame_buffer.h = 720;
-    frame_buffer.byte_size = frame_buffer.w * frame_buffer.h * sizeof(u32);
+    frame_buffer.pixel_size = frame_buffer.w * frame_buffer.h;
+    frame_buffer.byte_size = frame_buffer.pixel_size * sizeof(u32);
 
-    arr_set<u32>(frame_buffer.mem, 0x0, frame_buffer.w * frame_buffer.h);
+    arr_set<u32>(frame_buffer.mem, 0x0, frame_buffer.pixel_size);
 
     // @TEST: static img
     //draw_gradient(&frame_buffer);
@@ -252,8 +321,8 @@ int APIENTRY WinMain(HINSTANCE h_inst,
         OutputDebugStringA(buf);
 
         // @TEST: animated img
-        arr_set<u32>(frame_buffer.mem, 0x0, frame_buffer.w * frame_buffer.h);
-        draw_bouncing_square(&frame_buffer, dt);
+        //draw_bouncing_square(&frame_buffer, dt);
+        draw_fire(&frame_buffer, dt);
 
         RECT wnd_rect;
         GetWindowRect(window_handle, &wnd_rect);
