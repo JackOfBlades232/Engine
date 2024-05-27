@@ -4,9 +4,11 @@
 #include <cstdint>
 #include <cstddef>
 
+// @NOTE: candidates to be replaced with our functionality
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <cmath>
 
 typedef uint8_t  u8;
 typedef uint16_t u16;
@@ -18,6 +20,8 @@ typedef int32_t  s32;
 typedef int64_t  s64;
 typedef float    f32;
 typedef double   f64;
+
+static constexpr float c_f_pi = 3.14159265359f;
 
 struct frame_buffer_t {
     u32 *mem;
@@ -155,7 +159,8 @@ void draw_fire(frame_buffer_t *buf, float dt)
         for (int x = 0; x < buf->w; ++x)
             buf->mem[(buf->h - 1)*buf->w + x] = palette[(int)(((float)rand()/RAND_MAX) * 255.f)];
 
-        for (int y = 0; y < buf->h; ++y)
+        u32 *pixel = buf->mem;
+        for (int y = 0; y < buf->h-1; ++y)
             for (int x = 0; x < buf->w; ++x) {
                 int xm1 = MAX(x - 1, 0);
                 int xp1 = MIN(x + 1, buf->w-1);
@@ -171,16 +176,57 @@ void draw_fire(frame_buffer_t *buf, float dt)
                 u32 g_sum = ((p1m1 >> 8) & 0xFF) + ((p1 >> 8) & 0xFF) + ((p1p1 >> 8) & 0xFF) + ((p2 >> 8) & 0xFF);
                 u32 b_sum = (p1m1 & 0xFF) + (p1 & 0xFF) + (p1p1 & 0xFF) + (p2 & 0xFF);
 
-                buf->mem[y*buf->w + x] = 
+                *(pixel++) = 
                     ((u8)(r_sum * 64 / 257) << 16) |
                     ((u8)(g_sum * 64 / 257) << 8)  |
                     (u8)(b_sum * 64 / 257);
             }
     }
-
 }
 
-// @TODO: basic drawing & msg loop, quit on esc
+void draw_flower_of_life(frame_buffer_t *buf, float dt)
+{
+    const float grid_scale        = 5.f;
+    const float ang_vel           = c_f_pi / 9.f;
+    const float two_over_sqrt3    = 1.15470053838f;
+    const float minus1_over_sqrt3 = -two_over_sqrt3 * 0.5f;
+
+    static float angle = 0.f;
+    angle += dt * ang_vel;
+    float sine   = sinf(angle);
+    float cosine = cosf(angle);
+
+    float res_coeff = grid_scale / buf->h;
+
+    arr_set<u32>(frame_buffer.mem, 0x0, frame_buffer.pixel_size);
+
+    u32 *pixel = buf->mem;
+    for (int pix_y = 0; pix_y < buf->h; ++pix_y)
+        for (int pix_x = 0; pix_x < buf->w; ++pix_x) {
+            float base_x = 2.f * ((float)pix_x * res_coeff - 0.5f * buf->w * res_coeff);
+            float base_y = 2.f * ((float)pix_y * res_coeff - 0.5f * grid_scale);
+            
+            // Transform coords clockwise to get counterclockwise turn
+            float x = cosine * base_x + sine * base_y;
+            float y = -sine * base_x + cosine * base_y;
+
+            // Transform coords to <(sqrt(3)/2, 1/2), (0, 1)> basis
+            float transf_x = two_over_sqrt3 * x;
+            float transf_y = minus1_over_sqrt3 * x - y;
+
+            float integral;
+            if (modf(ABS(transf_x) + 0.02f, &integral) < 0.04f ||
+                modf(ABS(transf_y) + 0.02f, &integral) < 0.04f ||
+                modf(ABS(transf_x + transf_y) + 0.02f, &integral) < 0.04f)
+            {
+                *pixel = 0xFFFFFF;
+            }
+
+            ++pixel;
+        }
+}
+
+// @TODO: 
 
 LRESULT win32_window_proc(HWND h_wnd,
                           UINT u_msg,
@@ -322,7 +368,8 @@ int APIENTRY WinMain(HINSTANCE h_inst,
 
         // @TEST: animated img
         //draw_bouncing_square(&frame_buffer, dt);
-        draw_fire(&frame_buffer, dt);
+        //draw_fire(&frame_buffer, dt);
+        draw_flower_of_life(&frame_buffer, dt);
 
         RECT wnd_rect;
         GetWindowRect(window_handle, &wnd_rect);
