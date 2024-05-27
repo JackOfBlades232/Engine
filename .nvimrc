@@ -1,1 +1,1 @@
-nnoremap <leader>b :!cmake --build ./build/<CR>
+nnoremap <leader>b :!build\build.bat<CR>
