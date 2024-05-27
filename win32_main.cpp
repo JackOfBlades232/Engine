@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstddef>
 
+#include <cstdio>
+
 typedef uint8_t  u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
@@ -27,6 +29,12 @@ static int exit_code = 0;
 static HBITMAP frame_bmp           = nullptr;
 static frame_buffer_t frame_buffer = {};
 
+#define MIN(_a, _b) ((_a) < (_b) ? (_a) : (_b))
+#define MAX(_a, _b) ((_a) > (_b) ? (_a) : (_b))
+// @HUH: is this sus for non-int literals, and would a template be better?
+#define SGN(_x) ((_x) < 0 ? -1 : ((_x) > 0 ? 1 : 0))
+#define ABS(_x) ((_x) < 0 ? -(_x) : (_x))
+
 template <class T>
 void arr_set(T *arr, T val, size_t arr_size)
 {
@@ -40,6 +48,71 @@ void draw_gradient(frame_buffer_t *buf)
             buf->mem[y*buf->w + x] = ((u32)(255.f * (float)x / buf->w) << 16) |
                                      ((u32)(255.f * (float)y / buf->h) << 8);
         }
+}
+
+void draw_bouncing_square(frame_buffer_t *buf, float dt)
+{
+    const float meters_per_scr_h = 5.f;
+    const float cube_size        = 0.2f;
+    const float init_x_vel       = 0.4f;
+    const float grav             = 9.81f * 0.1f;
+    const float friction         = 2.5f;
+    const float absorption       = 0.5f;
+    const float ground_y         = 4.f;
+    const float fixed_dt         = 1.f/60.f;
+
+    static float x = 0.f, y = 0.f;
+    static float vel_x = init_x_vel, vel_y = 0.f;
+    static float accum_dt = 0.f;
+
+    accum_dt += dt;
+    while (accum_dt >= fixed_dt) {
+        accum_dt -= fixed_dt;
+
+        // Simulate
+        vel_y += grav * fixed_dt;
+
+        if (y >= ground_y - cube_size) {
+            y = ground_y - cube_size;
+            vel_y = -vel_y * (1.f - absorption);
+
+            float d_from_friction = MIN(friction * fixed_dt, ABS(vel_x));
+            vel_x -= SGN(vel_x) * d_from_friction;
+        }
+
+        x += vel_x * fixed_dt;
+        y += vel_y * fixed_dt;
+    }
+
+    float pix_per_meter = (float)buf->h / meters_per_scr_h;
+
+    // Draw ground
+    u32 *pixel = &buf->mem[(int)(ground_y * pix_per_meter - 1)*buf->w];
+    for (int draw_x = 0; draw_x < buf->w; ++draw_x)
+        *(pixel++) = 0xFFFFFF;
+
+    // Draw cube
+    int cube_size_pix = (int)(cube_size * pix_per_meter);
+
+    int min_x = (int)(x * pix_per_meter);
+    int min_y = (int)(y * pix_per_meter);
+    int max_x = min_x + cube_size_pix;
+    int max_y = min_y + cube_size_pix;
+
+    min_x = MAX(0, min_x);
+    min_y = MAX(0, min_y);
+    max_x = MIN(buf->w, max_x);
+    max_y = MIN(buf->h, max_y);
+
+    u32 cube_col = (0xFF << 16) | ((u8)((int)(x * 255.f)) << 8) | (u8)((int)(y * 255.f));
+
+    pixel = &buf->mem[min_y*buf->w + min_x];
+    for (int draw_y = min_y; draw_y < max_y; ++draw_y) {
+        for (int draw_x = min_x; draw_x < max_x; ++draw_x)
+            *(pixel++) = cube_col;
+
+        pixel += buf->w - (max_x - min_x);
+    }
 }
 
 // @TODO: basic drawing & msg loop, quit on esc
@@ -120,7 +193,7 @@ int APIENTRY WinMain(HINSTANCE h_inst,
     BITMAPINFO bmi = {};
     bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
     bmi.bmiHeader.biWidth       = 720;
-    bmi.bmiHeader.biHeight      = 720;
+    bmi.bmiHeader.biHeight      = -720;
     bmi.bmiHeader.biPlanes      = 1;
     bmi.bmiHeader.biBitCount    = 32;
     bmi.bmiHeader.biCompression = BI_RGB;
@@ -136,12 +209,21 @@ int APIENTRY WinMain(HINSTANCE h_inst,
     frame_buffer.h = 720;
     frame_buffer.byte_size = frame_buffer.w * frame_buffer.h * sizeof(u32);
 
-    // @TEST s
-    //arr_set<u32>(frame_buffer.mem, 0xFF00FF, frame_buffer.w * frame_buffer.h);
-    draw_gradient(&frame_buffer);
+    arr_set<u32>(frame_buffer.mem, 0x0, frame_buffer.w * frame_buffer.h);
+
+    // @TEST: static img
+    //draw_gradient(&frame_buffer);
 
     ShowWindow(window_handle, cmdshow);
     UpdateWindow(window_handle);
+
+    LARGE_INTEGER qpc_freq;
+    QueryPerformanceFrequency(&qpc_freq);
+
+    LARGE_INTEGER cur_qpc_counts;
+    LARGE_INTEGER prev_qpc_counts;
+    QueryPerformanceCounter(&cur_qpc_counts);
+    prev_qpc_counts = cur_qpc_counts;
 
     for (;;) {
         MSG msg;
@@ -158,6 +240,25 @@ int APIENTRY WinMain(HINSTANCE h_inst,
 
         if (quit)
             break;
+
+        QueryPerformanceCounter(&cur_qpc_counts);
+        u64 d_qpc_counts = cur_qpc_counts.QuadPart - prev_qpc_counts.QuadPart;
+        prev_qpc_counts = cur_qpc_counts;
+        float dt = (float)d_qpc_counts / qpc_freq.QuadPart;
+
+        // @TODO: debug logging funcs
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%.2fms per frame, %.2f fps\n", dt * 1e3, 1.f / dt);
+        OutputDebugStringA(buf);
+
+        // @TEST: animated img
+        arr_set<u32>(frame_buffer.mem, 0x0, frame_buffer.w * frame_buffer.h);
+        draw_bouncing_square(&frame_buffer, dt);
+
+        RECT wnd_rect;
+        GetWindowRect(window_handle, &wnd_rect);
+        InvalidateRect(window_handle, &wnd_rect, false);
+        UpdateWindow(window_handle);
     }
 
     return exit_code;
