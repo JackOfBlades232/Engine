@@ -190,6 +190,7 @@ void draw_flower_of_life(frame_buffer_t *buf, float dt)
     const float grid_scale        = 5.f;
     const float ang_vel           = c_f_pi / 9.f;
     const float two_over_sqrt3    = 1.15470053838f;
+    const float sqrt3_over_two    = 1.f / two_over_sqrt3;
     const float minus1_over_sqrt3 = -two_over_sqrt3 * 0.5f;
 
     static float angle = 0.f;
@@ -201,35 +202,102 @@ void draw_flower_of_life(frame_buffer_t *buf, float dt)
 
     arr_set<u32>(frame_buffer.mem, 0x0, frame_buffer.pixel_size);
 
+    // @SPEED: this is slow, and unoptimized
+
     u32 *pixel = buf->mem;
     for (int pix_y = 0; pix_y < buf->h; ++pix_y)
         for (int pix_x = 0; pix_x < buf->w; ++pix_x) {
             float base_x = 2.f * ((float)pix_x * res_coeff - 0.5f * buf->w * res_coeff);
             float base_y = 2.f * ((float)pix_y * res_coeff - 0.5f * grid_scale);
+
+            float r = sqrtf(base_x*base_x + base_y*base_y);
+            float r_int;
+            modf(r, &r_int);
+
+            const u32 colors[] = { 0xFFFF00, 0x00FF00, 0xFF00FF, 0xFF0000, 0x00FFFF, 0x0000FF };
+            u32 col = colors[(int)r_int % ARR_SIZE(colors)];
+            bool reverse_rotation = (int)r_int % 2 == 1;
             
-            // Transform coords clockwise to get counterclockwise turn
-            float x = cosine * base_x + sine * base_y;
-            float y = -sine * base_x + cosine * base_y;
+            // Rotate
+            float x = cosine * base_x - sine * base_y * (reverse_rotation ? -1.f : 1.f);
+            float y = sine * base_x * (reverse_rotation ? -1.f : 1.f) + cosine * base_y;
 
             // Transform coords to <(sqrt(3)/2, 1/2), (0, 1)> basis
             float transf_x = two_over_sqrt3 * x;
-            float transf_y = minus1_over_sqrt3 * x - y;
+            float transf_y = minus1_over_sqrt3 * x + y;
 
-            float integral;
-            if (modf(ABS(transf_x) + 0.02f, &integral) < 0.04f ||
-                modf(ABS(transf_y) + 0.02f, &integral) < 0.04f ||
-                modf(ABS(transf_x + transf_y) + 0.02f, &integral) < 0.04f)
-            {
-                *pixel = 0xFFFFFF;
+            float grid_x, grid_y;
+            float frac_x = modf(transf_x, &grid_x);
+            float frac_y = modf(transf_y, &grid_y);
+            if (transf_x < 0.f) {
+                grid_x -= 1.f;
+                frac_x += 1.f;
+            }
+            if (transf_y < 0.f) {
+                grid_y -= 1.f;
+                frac_y += 1.f;
             }
 
-            // @TODO: flower shape & colors
+            bool is_bottom_tri = frac_x + frac_y <= 1.f;
+            float grid_x_dec = sqrt3_over_two * grid_x;
+            float grid_y_dec = 0.5f*grid_x + grid_y;
+
+            float d1_x, d1_y;
+            if (is_bottom_tri) {
+                d1_x = grid_x_dec + sqrt3_over_two - x;
+                d1_y = grid_y_dec + 1.5f - y;
+            } else {
+                d1_x = grid_x_dec - x;
+                d1_y = grid_y_dec - y;
+            }
+            float d1 = d1_x*d1_x + d1_y*d1_y;
+            if (d1 < 0.92f) {
+                *(pixel++) = col; 
+                continue;
+            } else if (d1 < 1.f) {
+                *(pixel++) = 0xFFFFFF; 
+                continue;
+            }
+
+            float d2_x, d2_y;
+            if (is_bottom_tri) {
+                d2_x = grid_x_dec + sqrt3_over_two - x;
+                d2_y = grid_y_dec - 0.5f - y;
+            } else {
+                d2_x = grid_x_dec + 2.f*sqrt3_over_two - x;
+                d2_y = grid_y_dec + 1.f - y;
+            }
+            float d2 = d2_x*d2_x + d2_y*d2_y;
+            if (d2 < 0.92f) {
+                *(pixel++) = col; 
+                continue;
+            } else if (d2 < 1.f) {
+                *(pixel++) = 0xFFFFFF; 
+                continue;
+            }
+
+            float d3_x, d3_y;
+            if (is_bottom_tri) {
+                d3_x = grid_x_dec - sqrt3_over_two - x;
+                d3_y = grid_y_dec + 0.5f - y;
+            } else {
+                d3_x = grid_x_dec - x;
+                d3_y = grid_y_dec + 2.f - y;
+            }
+            float d3 = d3_x*d3_x + d3_y*d3_y;
+            if (d3 < 0.92f) {
+                *(pixel++) = col; 
+                continue;
+            } else if (d3 < 1.f) {
+                *(pixel++) = 0xFFFFFF; 
+                continue;
+            }
 
             ++pixel;
         }
 }
 
-// @TODO: 
+// @TODO: interactive test, main keys read
 
 LRESULT win32_window_proc(HWND h_wnd,
                           UINT u_msg,
