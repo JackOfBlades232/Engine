@@ -299,28 +299,48 @@ void draw_flower_of_life(frame_buffer_t *buf, float dt)
 
 // @TODO: interactive test, main keys read
 
+void win32_init_frame_buffer(frame_buffer_t *buf, HBITMAP *bmp,
+                             int w, int h,
+                             HWND h_wnd)
+{
+    HDC wnd_dc = GetDC(h_wnd);
+    BITMAPINFO bmi = {};
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = w;
+    bmi.bmiHeader.biHeight      = -h;
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    *bmp = CreateDIBSection(
+        wnd_dc, &bmi, DIB_RGB_COLORS, (void **)&buf->mem, nullptr, 0);
+    ReleaseDC(h_wnd, wnd_dc);
+    if (!*bmp) {
+        // @TODO: log & abort
+        return;
+    }
+
+    buf->w = w;
+    buf->h = h;
+    buf->pixel_size = buf->w * buf->h;
+    buf->byte_size = buf->pixel_size * sizeof(u32);
+
+    arr_set<u32>(buf->mem, 0x0, buf->pixel_size);
+}
+
 LRESULT win32_window_proc(HWND h_wnd,
                           UINT u_msg,
                           WPARAM w_param,
                           LPARAM l_param)
 {
     switch (u_msg) {
-    case WM_PAINT: {
-        PAINTSTRUCT ps;
-        BeginPaint(h_wnd, &ps);
-        HDC bmp_hdc = CreateCompatibleDC(ps.hdc);
-        HGDIOBJ old_obj = SelectObject(bmp_hdc, frame_bmp);
-        BitBlt(ps.hdc,
-               ps.rcPaint.left,
-               ps.rcPaint.top,
-               ps.rcPaint.right - ps.rcPaint.left,
-               ps.rcPaint.bottom - ps.rcPaint.top,
-               bmp_hdc,
-               ps.rcPaint.left,
-               ps.rcPaint.top,
-               SRCCOPY);
-        DeleteDC(bmp_hdc);
-        EndPaint(h_wnd, &ps);
+    case WM_SIZE: {
+        UINT w = LOWORD(l_param);
+        UINT h = HIWORD(l_param);
+        if (w != frame_buffer.w || h != frame_buffer.h) {
+            DeleteObject(frame_bmp);
+            win32_init_frame_buffer(&frame_buffer, &frame_bmp, w, h, h_wnd);
+        }
     } return 0;
 
     case WM_KEYDOWN:
@@ -374,34 +394,7 @@ int APIENTRY WinMain(HINSTANCE h_inst,
         return 1;
     }
 
-    HDC wnd_dc = GetDC(window_handle);
-    BITMAPINFO bmi = {};
-    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth       = 720;
-    bmi.bmiHeader.biHeight      = -720;
-    bmi.bmiHeader.biPlanes      = 1;
-    bmi.bmiHeader.biBitCount    = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
-
-    frame_bmp = CreateDIBSection(
-        wnd_dc, &bmi, DIB_RGB_COLORS, (void **)&frame_buffer.mem, nullptr, 0);
-    if (!frame_bmp) {
-        // @TODO: log
-        return 1;
-    }
-
-    frame_buffer.w = 720;
-    frame_buffer.h = 720;
-    frame_buffer.pixel_size = frame_buffer.w * frame_buffer.h;
-    frame_buffer.byte_size = frame_buffer.pixel_size * sizeof(u32);
-
-    arr_set<u32>(frame_buffer.mem, 0x0, frame_buffer.pixel_size);
-
-    // @TEST: static img
-    //draw_gradient(&frame_buffer);
-
     ShowWindow(window_handle, cmdshow);
-    UpdateWindow(window_handle);
 
     LARGE_INTEGER qpc_freq;
     QueryPerformanceFrequency(&qpc_freq);
@@ -437,15 +430,30 @@ int APIENTRY WinMain(HINSTANCE h_inst,
         snprintf(buf, sizeof(buf), "%.2fms per frame, %.2f fps\n", dt * 1e3, 1.f / dt);
         OutputDebugStringA(buf);
 
+        // @TEST: static img
+        //draw_gradient(&frame_buffer);
+
         // @TEST: animated img
         //draw_bouncing_square(&frame_buffer, dt);
         //draw_fire(&frame_buffer, dt);
         draw_flower_of_life(&frame_buffer, dt);
 
         RECT wnd_rect;
-        GetWindowRect(window_handle, &wnd_rect);
-        InvalidateRect(window_handle, &wnd_rect, false);
-        UpdateWindow(window_handle);
+        GetClientRect(window_handle, &wnd_rect);
+        HDC wnd_dc = GetDC(window_handle);
+        HDC bmp_dc = CreateCompatibleDC(wnd_dc);
+        SelectObject(bmp_dc, frame_bmp);
+        BitBlt(wnd_dc,
+               wnd_rect.left,
+               wnd_rect.top,
+               wnd_rect.right - wnd_rect.left,
+               wnd_rect.bottom - wnd_rect.top,
+               bmp_dc,
+               wnd_rect.left,
+               wnd_rect.top,
+               SRCCOPY);
+        DeleteDC(bmp_dc);
+        ReleaseDC(window_handle, wnd_dc);
     }
 
     return exit_code;
